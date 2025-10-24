@@ -12,58 +12,42 @@ struct PracticeView: View {
     
     // MARK: - Properties
     
-    // EINGEHENDE DATEN: Die Einstellungen, die vom SettingsView übergeben wurden.
-    let settings: SessionSettings // KEIN @State hier, da von außen übergeben
+    let settings: SessionSettings
 
-    // UMGEBUNGS-VARIABLEN
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismissView
     
-    // DATENBANK-ABFRAGEN
-    // Diese @Query-Variablen werden AUTOMATISCH von SwiftData initialisiert
-    // und dürfen NICHT im benutzerdefinierten init() angefasst werden.
     @Query private var allWrongAnswerRecords: [WrongAnswerRecord]
-    @Query private var gamificationRecords: [GamificationRewards]
+    // @Query private var allGamificationRecords: [GamificationRewards] ist hier nicht mehr nötig
+    // da wir direkt den ModelContext verwenden, um die Belohnungen zu holen/upzudaten.
     
-    // Computed Property für GamificationRewards für einfachen Zugriff
-    private var rewards: GamificationRewards? {
-        gamificationRecords.first
-    }
+    // Die 'rewards' Computed Property ist jetzt überflüssig, da wir direkt auf die Instanz zugreifen.
     
-    // STATE-VARIABLEN (Der Zustand der Übung) - Alle mit Initialwerten
     @State private var currentQuestion: Question?
     @State private var userAnswer: String = ""
     @State private var currentQuestionIndex: Int = 0
     @State private var correctAnswers: Int = 0
-    @State private var wronglyAnswered: [Question] = [] // Für die Zusammenfassung am Ende
+    @State private var wronglyAnswered: [Question] = []
     
-    // UI-STEUERUNG
     @State private var showResultToast: Bool = false
     @State private var wasLastAnswerCorrect: Bool = false
     @State private var isSessionFinished: Bool = false
     @State private var isTimerRunning: Bool = false
+    @State private var showingAbortConfirmation: Bool = false
 
-    // TIMER-PROPERTIES
     let timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
     @State private var timeRemaining: Double = 0.0
-    @State private var totalTime: Double = 1.0 // Initialwert > 0 für Division durch Null Schutz
+    @State private var totalTime: Double = 1.0
 
-    // SPEZIELLE LOGIK FÜR FALSCHE RECHNUNGEN
     @State private var currentWrongAnswerStack: [WrongAnswerRecord] = []
     @State private var askedWrongAnswerCount: Int = 0
     
-    // Zähler für Gamification-Logik (werden pro Session zurückgesetzt)
     @State private var correctAnswersSinceLastUnicorn: Int = 0
     @State private var wrongAnswersSinceLastBanana: Int = 0
     
     // MARK: - Initializer
-    // DIESER INITIALIZER IST NUR FÜR DEN "settings"-PARAMETER NOTWENDIG.
-    // Alle @State-Variablen MÜSSEN direkt bei der Deklaration einen initialen Wert erhalten.
     init(settings: SessionSettings) {
         self.settings = settings
-        // SwiftData initialisiert @Query automatisch.
-        // Die @State-Variablen werden entweder direkt oben initialisiert
-        // oder in 'startGame()' zurückgesetzt, das in '.onAppear' aufgerufen wird.
     }
 
     // MARK: - UI Body
@@ -83,7 +67,7 @@ struct PracticeView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
             } else {
-                ProgressView() // Zeigt einen Ladeindikator, wenn Frage noch nicht da ist
+                ProgressView()
             }
             
             TextField("Deine Antwort", text: $userAnswer)
@@ -116,7 +100,24 @@ struct PracticeView: View {
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
         
-        // Beim ersten Erscheinen der View starten wir das Spiel.
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button("Abbrechen") {
+                    showingAbortConfirmation = true
+                }
+            }
+        }
+        .confirmationDialog("Übung wirklich abbrechen?", isPresented: $showingAbortConfirmation) {
+            Button("Abbrechen", role: .destructive) {
+                endSession(aborted: true)
+            }
+            Button("Weiter", role: .cancel) {
+                // Nichts tun, Dialog schließen
+            }
+        } message: {
+            Text("Der aktuelle Fortschritt wird gespeichert.")
+        }
+        
         .onAppear {
             startGame()
         }
@@ -127,11 +128,10 @@ struct PracticeView: View {
             if timeRemaining > 0 {
                 timeRemaining -= 0.1
             } else {
-                endSession()
+                endSession(aborted: false)
             }
         }
         
-        // Das ToastView wird als Overlay angezeigt
         .overlay(
             ToastView(
                 message: wasLastAnswerCorrect ? "Richtig! 🦄" : "Falsch! 🍌",
@@ -140,12 +140,11 @@ struct PracticeView: View {
             )
         )
         
-        // Das SessionSummaryView wird als Sheet angezeigt, wenn die Session beendet ist
         .sheet(isPresented: $isSessionFinished, onDismiss: {
-            dismissView() // Geht zurück zum Start- oder Einstellungsbildschirm
+            dismissView()
         }) {
             SessionSummaryView(
-                totalQuestions: currentQuestionIndex + 1, // Tatsächlich gestellte Fragen
+                totalQuestions: currentQuestionIndex + 1,
                 correctAnswers: correctAnswers,
                 wronglyAnswered: wronglyAnswered
             )
@@ -154,7 +153,6 @@ struct PracticeView: View {
     
     // MARK: - Game Logic Functions
     
-    // Initialisiert oder setzt den Zustand für ein neues Spiel zurück
     func startGame() {
         currentQuestionIndex = 0
         correctAnswers = 0
@@ -169,10 +167,9 @@ struct PracticeView: View {
             timeRemaining = totalTime
             isTimerRunning = true
         } else {
-            isTimerRunning = false // Timer nicht laufen lassen, wenn nicht verwendet
+            isTimerRunning = false
         }
         
-        // Vorbereitung der falsch beantworteten Fragen für diese Session
         if settings.isWrongAnswersOnlySession || settings.includeWronglyAnswered {
             currentWrongAnswerStack = allWrongAnswerRecords.shuffled()
             
@@ -180,44 +177,34 @@ struct PracticeView: View {
                 currentWrongAnswerStack = Array(currentWrongAnswerStack.prefix(settings.numberOfQuestions))
             }
         } else {
-            currentWrongAnswerStack = [] // Leeren, wenn nicht benötigt
+            currentWrongAnswerStack = []
         }
         
-        generateQuestion() // Generiert die erste Frage
+        generateQuestion()
     }
     
-    // Generiert die nächste Frage basierend auf den Einstellungen
     func generateQuestion() {
         var questionFromWrongAnswers: WrongAnswerRecord?
         
-        // Priorität 1: Nur falsch beantwortete Rechnungen, wenn in diesem Modus
         if settings.isWrongAnswersOnlySession && !currentWrongAnswerStack.isEmpty {
             questionFromWrongAnswers = currentWrongAnswerStack.removeFirst()
             askedWrongAnswerCount += 1
-        }
-        // Priorität 2: Falsche Rechnungen einstreuen, wenn aktiviert und verfügbar
-        else if settings.includeWronglyAnswered && !currentWrongAnswerStack.isEmpty {
-            // Mit einer gewissen Wahrscheinlichkeit (z.B. 30%) eine falsche Frage einstreuen
+        } else if settings.includeWronglyAnswered && !currentWrongAnswerStack.isEmpty {
             if Int.random(in: 1...100) <= 30 {
                 questionFromWrongAnswers = currentWrongAnswerStack.removeFirst()
             }
         }
         
-        // Wenn eine falsche Frage gefunden wurde, verwenden wir diese
         if let wrongQuestion = questionFromWrongAnswers {
             self.currentQuestion = Question(text: wrongQuestion.questionText + " = ?", answer: wrongQuestion.correctAnswer)
         } else {
-            // Ansonsten generieren wir eine normale neue Frage
             var availableOps: [String] = []
             if settings.useAddition { availableOps.append("+") }
             if settings.useSubtraction { availableOps.append("-") }
             if settings.useMultiplication { availableOps.append("x") }
             if settings.useDivision { availableOps.append("÷") }
             
-            // Wenn keine Rechenarten ausgewählt sind, aber auch keine falschen Fragen zur Verfügung standen,
-            // ist dies ein Fehlerzustand oder die Session sollte nicht startbar sein.
             guard let operation = availableOps.randomElement() else {
-                // Dies sollte nicht passieren, wenn der Start-Button in SettingsView korrekt disabled ist.
                 self.currentQuestion = Question(text: "Fehler: Keine Operationen", answer: 0)
                 return
             }
@@ -258,19 +245,16 @@ struct PracticeView: View {
                     }
                     
                 case "x":
-                    num2 = Int.random(in: 0...10)
-                    if num2 == 0 {
-                        num1 = Int.random(in: 0...100)
-                    } else {
-                        num1 = Int.random(in: 0...(100 / num2))
-                    }
+                    num1 = Int.random(in: 1...10)
+                    num2 = Int.random(in: 1...10)
+                    
                     answer = num1 * num2
-                    questionText = "\(num1) x \(num2)"
+                    questionText = "\(num1) ⋅ \(num2)"
                     
                 case "÷":
-                    num2 = Int.random(in: 1...10) // Divisor nicht Null
-                    answer = Int.random(in: 0...(100 / num2))
-                    num1 = num2 * answer // Sicherstellen, dass das Ergebnis ganzzahlig ist
+                    num2 = Int.random(in: 1...10)
+                    answer = Int.random(in: 0...10)
+                    num1 = num2 * answer
                     questionText = "\(num1) ÷ \(num2)"
                     
                 default:
@@ -282,7 +266,6 @@ struct PracticeView: View {
         }
     }
     
-    // Überprüft die Benutzerantwort und aktualisiert den Zustand
     func checkAnswer() {
         guard let answerInt = Int(userAnswer) else { return }
         guard let question = currentQuestion else { return }
@@ -292,12 +275,11 @@ struct PracticeView: View {
             correctAnswers += 1
             correctAnswersSinceLastUnicorn += 1
             
-            // Wenn eine falsch beantwortete Frage richtig gelöst wurde, aus Datenbank löschen
             if let recordToDelete = allWrongAnswerRecords.first(where: { $0.questionText + " = ?" == question.text && $0.correctAnswer == question.answer }) {
                 modelContext.delete(recordToDelete)
                 
                 // Banane reduzieren, wenn eine alte falsche Frage richtig gelöst wird
-                if let r = rewards {
+                if let r = getGamificationRewards() { // NEU: Belohnungen über Funktion holen
                     if r.bananas > 0 {
                         r.bananas -= 1
                     }
@@ -310,9 +292,6 @@ struct PracticeView: View {
             wronglyAnswered.append(question)
             wrongAnswersSinceLastBanana += 1
             
-            // Wenn eine *neue* Frage falsch beantwortet wurde, zur Datenbank hinzufügen
-            // (oder wenn eine bereits falsch beantwortete Frage erneut falsch beantwortet wurde,
-            // aber nicht durch den currentWrongAnswerStack kam, wird sie als neu hinzugefügt.)
             let questionTextWithoutEquals = question.text.replacingOccurrences(of: " = ?", with: "")
             let isAlreadyWrongAnswer = allWrongAnswerRecords.contains(where: { $0.questionText == questionTextWithoutEquals && $0.correctAnswer == question.answer })
             
@@ -326,7 +305,7 @@ struct PracticeView: View {
             }
             
             // Wenn eine Banane dazukommt, wird automatisch ein Einhorn weggenommen
-            if let r = rewards {
+            if let r = getGamificationRewards() { // NEU: Belohnungen über Funktion holen
                 if r.unicorns > 0 {
                     r.unicorns -= 1
                 }
@@ -334,54 +313,59 @@ struct PracticeView: View {
             }
         }
         
-        // Gamification-Belohnungen prüfen und anwenden
         applyGamificationRewards()
         
-        // UI Feedback und nächste Frage
         showResultToast = true
-        isTimerRunning = false // Timer kurz anhalten für Feedback
+        isTimerRunning = false
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             showResultToast = false
             nextQuestion()
-            if settings.useTimer { isTimerRunning = true } // Timer wieder starten
+            if settings.useTimer { isTimerRunning = true }
         }
     }
     
-    // Logik für das Sammeln von Einhörnern und Bananen
     private func applyGamificationRewards() {
-        guard let r = rewards else {
-            // Sollte dank ensureGamificationRewardsExist in StartView nicht passieren,
-            // aber zur Sicherheit.
-            print("Fehler: GamificationRewards-Objekt nicht gefunden.")
+        guard let r = getGamificationRewards() else { // NEU: Belohnungen über Funktion holen
+            print("Fehler: GamificationRewards-Objekt nicht gefunden (in applyGamificationRewards).")
             return
         }
         
-        // Einhörner sammeln (für alle 10 richtigen Antworten)
         while correctAnswersSinceLastUnicorn >= 10 {
             r.unicorns += 1
             correctAnswersSinceLastUnicorn -= 10
             print("Ein Einhorn gesammelt! Aktuell: \(r.unicorns) Einhörner")
         }
         
-        // Bananen sammeln (für alle 10 falschen Antworten)
         while wrongAnswersSinceLastBanana >= 10 {
             r.bananas += 1
             wrongAnswersSinceLastBanana -= 10
             print("Eine Banane gesammelt! Aktuell: \(r.bananas) Bananen")
             
-            // Wenn eine Banane dazu kommt, wird automatisch ein Einhorn weggenommen
             if r.unicorns > 0 {
                 r.unicorns -= 1
                 print("Ein Einhorn für eine Banane geopfert. Aktuell: \(r.unicorns) Einhörner")
             }
         }
         
-        r.lastUpdated = Date() // Letzte Aktualisierung speichern
+        r.lastUpdated = Date()
+        // try? modelContext.save() // Explizites Speichern, wenn Änderungen sofort sichtbar sein sollen.
+                               // Normalerweise nicht nötig, da SwiftData Änderungen automatisch nach einer Transaktion speichert.
     }
     
-    // Geht zur nächsten Frage oder beendet die Session
+    // NEU: Hilfsfunktion, um das GamificationRewards-Objekt aus dem ModelContext zu holen
+    private func getGamificationRewards() -> GamificationRewards? {
+        do {
+            let fetchDescriptor = FetchDescriptor<GamificationRewards>()
+            let rewards = try modelContext.fetch(fetchDescriptor)
+            return rewards.first // Wir erwarten nur ein Objekt
+        } catch {
+            print("Fehler beim Abrufen der GamificationRewards: \(error)")
+            return nil
+        }
+    }
+    
     func nextQuestion() {
-        userAnswer = "" // Eingabefeld leeren
+        userAnswer = ""
         
         let totalQuestionsAsked = currentQuestionIndex + 1
         let shouldEndDueToCount = totalQuestionsAsked >= settings.numberOfQuestions
@@ -394,28 +378,32 @@ struct PracticeView: View {
         }
         
         if shouldEndDueToCount || shouldEndDueToWrongAnswersDepleted {
-            endSession()
+            endSession(aborted: false)
         } else {
             currentQuestionIndex += 1
             generateQuestion()
         }
     }
     
-    // Beendet die aktuelle Übungssitzung
-    func endSession() {
+    func endSession(aborted: Bool) {
         isTimerRunning = false
         isSessionFinished = true
         
-        // SessionRecord speichern
-        let newRecord = SessionRecord(
-            date: Date(),
-            totalQuestions: currentQuestionIndex + 1, // Tatsächlich gestellte Fragen
-            correctAnswers: correctAnswers
-        )
-        modelContext.insert(newRecord)
+        if currentQuestionIndex >= 0 {
+            let newRecord = SessionRecord(
+                date: Date(),
+                totalQuestions: currentQuestionIndex + 1,
+                correctAnswers: correctAnswers
+            )
+            modelContext.insert(newRecord)
+        }
         
-        // Sicherstellen, dass alle ausstehenden Rewards angewendet werden,
-        // bevor die Session beendet und die View geschlossen wird.
         applyGamificationRewards()
+        
+        if aborted {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                dismissView()
+            }
+        }
     }
 }

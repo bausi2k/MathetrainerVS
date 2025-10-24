@@ -12,13 +12,16 @@ struct StartView: View {
     
     @Query private var wrongAnswerRecords: [WrongAnswerRecord]
     
-    // NEU: Zugriff auf die GamificationRewards
+    // Wir holen alle Belohnungen, erwarten aber, dass es nur eine gibt.
     @Query private var gamificationRewards: [GamificationRewards]
     
-    // Hilfsvariable für die Belohnungen (holt den ersten Eintrag oder erstellt einen Default)
+    // Die computed property bleibt gleich, da sie nur den aktuell ersten Eintrag zurückgibt.
     private var rewards: GamificationRewards {
-        gamificationRewards.first ?? GamificationRewards()
+        gamificationRewards.first ?? GamificationRewards() // Falls noch keine existiert
     }
+    
+    // Benötigen den ModelContext für ensureGamificationRewardsExist
+    @Environment(\.modelContext) private var modelContext
     
     var body: some View {
         VStack(spacing: 30) {
@@ -27,20 +30,20 @@ struct StartView: View {
                 .font(.largeTitle)
                 .fontWeight(.bold)
             
-            // NEUE ANZEIGE DER BELOHNUNGEN
+// In StartView.swift im body:
             HStack(spacing: 20) {
-                Label("\(rewards.unicorns)", systemImage: "sparkles") // Einhorn-Symbol
+                // Einhorn-Anzeige
+                Text("🦄 \(rewards.unicorns)") // Emoji direkt vor der Zahl
                     .font(.title2)
-                    .foregroundColor(.purple)
-                Label("\(rewards.bananas)", systemImage: "tropicalfish") // Bananen-Symbol (oder 'leaf.fill', 'square.fill' als Platzhalter)
+                    .foregroundColor(.purple) // Farbe ist hier immer noch relevant für den Text
+
+                // Bananen-Anzeige
+                Text("🍌 \(rewards.bananas)") // Emoji direkt vor der Zahl
                     .font(.title2)
                     .foregroundColor(.orange)
             }
             .padding(.bottom, 10)
             
-            // ... (Rest der Buttons bleiben gleich) ...
-            
-            // 1. Button (NavigationLink) zum Starten einer neuen Übung
             NavigationLink(destination: SettingsView(isWrongAnswersOnlySession: false)) {
                 Text("Neue Übung starten")
                     .font(.title2)
@@ -51,7 +54,6 @@ struct StartView: View {
                     .cornerRadius(10)
             }
             
-            // NEUER BUTTON: Falsche Rechnungen üben
             NavigationLink(destination: SettingsView(isWrongAnswersOnlySession: true)) {
                 Text("Falsche Rechnungen üben")
                     .font(.title2)
@@ -63,7 +65,6 @@ struct StartView: View {
             }
             .disabled(wrongAnswerRecords.isEmpty)
             
-            // 3. Button (NavigationLink) zur Statistik
             NavigationLink(destination: StatisticsView()) {
                 Text("Meine Statistik ansehen")
                     .font(.title2)
@@ -77,18 +78,18 @@ struct StartView: View {
         .padding()
         .navigationTitle("Start")
         .navigationBarHidden(true)
-        .onAppear(perform: ensureGamificationRewardsExist) // NEU: Sicherstellen, dass ein Rewards-Objekt existiert
+        .onAppear(perform: ensureGamificationRewardsExist)
     }
     
-    // NEUE FUNKTION: Sicherstellen, dass ein GamificationRewards-Objekt in der DB ist
     private func ensureGamificationRewardsExist() {
+        // Nur ein Objekt des Typs GamificationRewards soll existieren.
+        // Wenn keines da ist, erstellen wir eins.
         if gamificationRewards.isEmpty {
             let newRewards = GamificationRewards()
             modelContext.insert(newRewards)
-            // modelContext.save() ist normalerweise nicht nötig, da SwiftData Änderungen automatisch speichert.
+            // SwiftData speichert normalerweise automatisch. Ein explizites save() ist hier nicht zwingend,
+            // aber schadet auch nicht, um sicherzustellen.
+            // try? modelContext.save()
         }
     }
-    
-    // NEU: Zugriff auf den ModelContext für ensureGamificationRewardsExist
-    @Environment(\.modelContext) private var modelContext
 }
